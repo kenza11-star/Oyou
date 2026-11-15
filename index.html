@@ -4,7 +4,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>VoiceReel Studio</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <style>
 :root{--bg:#0d0f14;--card:#161a22;--line:#262c38;--tx:#e8ecf3;--mut:#8a94a7;--ac:#6ea8ff;--ok:#4ade80;--er:#f87171}
 *{box-sizing:border-box}
@@ -34,9 +33,9 @@ details.adv{margin-bottom:12px}details.adv>summary{cursor:pointer;color:var(--mu
 </head>
 <body>
 <h1>VoiceReel Studio</h1>
-<div class="sub">Isi naskah → buat suara (Gemini / ElevenLabs) → sinkron ke video → render. Semua jalan di browser, siap deploy Vercel (static).</div>
+<div class="sub">Isi naskah → buat suara (Gemini / ElevenLabs) → sinkronkan dengan video. Jalan di browser, siap deploy Vercel (static).</div>
 
-<div class="steps"><b>Cara cepat:</b> 1) isi API key → 2) tulis naskah, klik <b>Buat Suara</b> → 3) upload video → 4) klik <b>Render</b> dan unduh.</div>
+<div class="steps"><b>Cara cepat:</b> 1) isi API key → 2) tulis naskah, klik <b>Buat Suara</b> → 3) pilih video dari Galeri → 4) tekan play, narasi ikut sinkron. Geser dengan −/+ kalau perlu.</div>
 <div class="card">
   <h2>1. Mesin Suara</h2>
   <div class="tabs"><button id="tG">Gemini TTS</button><button id="tE" class="off">ElevenLabs</button></div>
@@ -80,201 +79,28 @@ details.adv{margin-bottom:12px}details.adv>summary{cursor:pointer;color:var(--mu
   <textarea id="script" placeholder="Selamat datang di video kami.&#10;Ini adalah baris kedua.&#10;Dan ini penutupnya."></textarea>
   <div class="row">
     <div><label>Jeda antar segmen (detik)</label><input id="gap" type="number" value="0.4" step="0.1" min="0"></div>
-    <div><label>Mulai narasi di detik ke</label><input id="offset" type="number" value="0" step="0.1" min="0"></div>
+    <div><label>Mulai narasi di detik ke</label><input id="offset" type="number" value="0" step="0.1"></div>
   </div>
   <button id="gen">Buat Suara</button>
   <div class="bar"><i id="gbar"></i></div>
   <div id="log"></div>
-  <div id="segs"></div>
 </div>
 
 <div class="card">
-  <h2>3. Video</h2>
-  <label>Upload video (.mp4/.webm), ZIP berisi video, atau ZIP urutan gambar frame (frame-0001.png, frame-0002.png, ...)</label>
-  <input type="file" id="vfile" accept="video/*,.zip">
-  <div id="zinfo" class="note"></div>
-  <video id="vprev" controls playsinline class="hide"></video>
+  <h2>3. Video + Sinkron suara</h2>
+  <label>Pilih video dari Galeri</label>
+  <input type="file" id="vfile" accept="video/*">
+  <video id="vprev" controls playsinline class="hide" style="margin-top:10px"></video>
+  <div class="note">Tekan play: narasi ikut jalan otomatis, ikut berhenti saat pause, dan ikut loncat saat video digeser. Kalau belum pas, geser tiap kalimat dengan tombol −/+ , atau pause video di posisi yang diinginkan lalu tekan 📍 pada kalimat itu.</div>
   <div class="row">
-    <div><label>Volume suara asli video</label><input type="range" id="origVol" min="0" max="1" step="0.05" value="0.25"></div>
+    <div><label>Volume suara asli video</label><input type="range" id="origVol" min="0" max="1" step="0.05" value="0.3"></div>
     <div><label>Volume narasi</label><input type="range" id="narVol" min="0" max="2" step="0.05" value="1"></div>
   </div>
-  <div class="row">
- <div><label>Resolusi (sisi pendek)</label><select id="rRes"><option value="0">Sama seperti sumber</option><option value="720">720p</option><option value="1080" selected>1080p (Full HD)</option><option value="1440">1440p (2K)</option><option value="2160">2160p (4K)</option></select></div>
- <div><label>FPS</label><select id="rFps"><option>24</option><option selected>30</option><option>60</option></select></div>
- <div><label>Bitrate</label><select id="rBr"><option value="8">8 Mbps</option><option value="12" selected>12 Mbps</option><option value="20">20 Mbps</option><option value="35">35 Mbps (4K)</option></select></div>
+  <div id="segs"></div>
+  <button class="sec" id="resetAdj">Reset penyesuaian</button>
+  <button id="dl" disabled>Unduh audio narasi sinkron (.wav)</button>
+  <div class="note">WAV ini sudah mengikuti posisi sinkronmu dan mulai dari detik 0 video. Tinggal taruh di awal timeline editor (CapCut dll) bersama videonya.</div>
 </div>
-<button id="render" disabled>Render HD (video + suara)</button>
-  <div class="bar"><i id="rbar"></i></div>
-  <div id="rlog" class="note"></div>
-  <div id="out"></div>
-  <div class="note">Render berjalan real-time (durasi video = waktu render). Biarkan tab tetap terbuka dan layar menyala.</div>
-</div>
-
-<details class="adv"><summary>Opsi lanjutan (proyek Remotion &amp; render server)</summary>
-<div class="card">
-  <h2>4. Untuk proyek Remotion (ZIP kode)</h2>
-  <div class="note">Remotion butuh Node + Chrome, jadi render videonya dilakukan di komputer/server/Remotion Lambda. Alat ini membuat <b>paket voice-over</b> (audio per segmen, narration.wav penuh, timings.json) yang tinggal dimasukkan ke folder <code>public/</code> proyek Remotion supaya suara pas dengan frame.</div>
-  <button class="sec" id="pack" disabled>Unduh Paket Voice-over (.zip)</button>
-  <label>Cara render Remotion</label>
-  <pre>npm install
-npx remotion render src/index.ts MyComp out.mp4
-# lalu upload out.mp4 ke alat ini, atau pakai narration.wav lewat &lt;Audio&gt;</pre>
-</div>
-
-<div class="card">
-  <h2>5. Render server (GitHub Actions) — HD presisi</h2>
-  <div class="note">Tidak real-time, tidak tergantung HP. Mendukung video biasa (ffmpeg) dan proyek Remotion. Unduh kit, taruh di repo GitHub, jalankan workflow dari HP, ambil hasilnya dari Artifacts. Kit otomatis menyertakan narration.wav kalau suara sudah dibuat.</div>
-  <button class="sec" id="kitBtn">Unduh Kit Render (.zip)</button>
-  <button class="sec" id="copyWf">Salin isi workflow (buat manual di GitHub)</button>
-  <div id="kitlog" class="note"></div>
-</div>
-</details>
-<script type="text/plain" id="wfYml">
-name: Render Video HD
-
-on:
-  workflow_dispatch:
-    inputs:
-      mode:
-        description: "ffmpeg = video jadi + suara (cepat) | remotion = render proyek Remotion"
-        type: choice
-        default: ffmpeg
-        options: [ffmpeg, remotion]
-      short_side:
-        description: "ffmpeg: sisi pendek hasil (1080 / 1440 / 2160)"
-        default: "1080"
-      fps:
-        description: "ffmpeg: FPS (24 / 30 / 60)"
-        default: "30"
-      crf:
-        description: "Kualitas (16 sangat bagus, 18 bagus, 23 lebih kecil)"
-        default: "18"
-      orig_volume:
-        description: "ffmpeg: volume suara asli video (0 - 1)"
-        default: "0.25"
-      video_url:
-        description: "ffmpeg: link langsung ke video (opsional, untuk file besar)"
-        default: ""
-      narration_url:
-        description: "ffmpeg: link langsung ke narration.wav (opsional)"
-        default: ""
-      remotion_entry:
-        description: "remotion: file entry"
-        default: "src/index.ts"
-      remotion_comp:
-        description: "remotion: ID komposisi"
-        default: "MyComp"
-      remotion_scale:
-        description: "remotion: skala resolusi (1 = asli, 2 = 2x)"
-        default: "1"
-
-jobs:
-  render:
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
-    env:
-      MODE: ${{ inputs.mode }}
-      S: ${{ inputs.short_side }}
-      FPS: ${{ inputs.fps }}
-      CRF: ${{ inputs.crf }}
-      OV: ${{ inputs.orig_volume }}
-      VIDEO_URL: ${{ inputs.video_url }}
-      NAR_URL: ${{ inputs.narration_url }}
-      ENTRY: ${{ inputs.remotion_entry }}
-      COMP: ${{ inputs.remotion_comp }}
-      SCALE: ${{ inputs.remotion_scale }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Pasang ffmpeg
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
-
-      - name: Render dengan ffmpeg (video + narasi)
-        if: ${{ inputs.mode == 'ffmpeg' }}
-        run: |
-          set -euo pipefail
-          mkdir -p input out
-          if [ -n "${VIDEO_URL:-}" ]; then curl -L --fail -o input/zz_video_url.mp4 "$VIDEO_URL"; fi
-          if [ -n "${NAR_URL:-}" ]; then curl -L --fail -o input/zz_narration_url.wav "$NAR_URL"; fi
-
-          VIDEO=""
-          if [ -f input/zz_video_url.mp4 ]; then VIDEO=input/zz_video_url.mp4
-          else VIDEO=$(ls input/*.mp4 input/*.mov input/*.webm input/*.mkv input/*.m4v 2>/dev/null | head -n1 || true); fi
-          [ -n "$VIDEO" ] || { echo "::error::Tidak ada video. Taruh di folder input/ atau isi video_url."; exit 1; }
-
-          NAR=""
-          for f in input/zz_narration_url.wav input/narration.wav input/narration.mp3 public/narration.wav; do
-            if [ -f "$f" ]; then NAR="$f"; break; fi
-          done
-          echo "Video: $VIDEO | Narasi: ${NAR:-tidak ada}"
-
-          VD=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$VIDEO")
-          ND=0
-          if [ -n "$NAR" ]; then ND=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$NAR"); fi
-          HASA=$(ffprobe -v error -select_streams a -show_entries stream=codec_type -of csv=p=0 "$VIDEO" | head -n1 || true)
-
-          EXT=$(awk -v v="$VD" -v n="$ND" 'BEGIN{d=n-v; if(d>0.05) printf "%.3f",d; else printf "0"}')
-          T=$(awk -v v="$VD" -v n="$ND" 'BEGIN{printf "%.3f",(n>v?n:v)}')
-
-          VF="fps=${FPS},scale=w='if(gte(iw,ih),-2,${S})':h='if(gte(iw,ih),${S},-2)':flags=lanczos"
-          if [ "$EXT" != "0" ]; then VF="${VF},tpad=stop_mode=clone:stop_duration=${EXT}"; fi
-
-          ENC="-c:v libx264 -preset medium -crf ${CRF} -pix_fmt yuv420p -profile:v high -movflags +faststart -c:a aac -b:a 192k -t ${T}"
-
-          if [ -z "$NAR" ]; then
-            ffmpeg -y -i "$VIDEO" -vf "$VF" -map 0:v -map 0:a? $ENC out/video-hd.mp4
-          elif [ -n "$HASA" ]; then
-            ffmpeg -y -i "$VIDEO" -i "$NAR" -filter_complex "[0:v]${VF}[v];[0:a]volume=${OV}[oa];[1:a]volume=1.0[na];[oa][na]amix=inputs=2:duration=longest:dropout_transition=0,volume=2[a]" -map "[v]" -map "[a]" $ENC out/video-hd.mp4
-          else
-            ffmpeg -y -i "$VIDEO" -i "$NAR" -filter_complex "[0:v]${VF}[v];[1:a]volume=1.0[a]" -map "[v]" -map "[a]" $ENC out/video-hd.mp4
-          fi
-          ls -lh out
-
-      - name: Pasang Node
-        if: ${{ inputs.mode == 'remotion' }}
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Render proyek Remotion
-        if: ${{ inputs.mode == 'remotion' }}
-        run: |
-          set -euo pipefail
-          sudo apt-get install -y libnss3 libdbus-1-3 libatk1.0-0 libgbm-dev libasound2t64 libxrandr2 libxkbcommon-dev libxfixes3 libxcomposite1 libxdamage1 libatk-bridge2.0-0 libpango-1.0-0 libcairo2 libcups2
-          mkdir -p out
-          npm ci --no-audit --no-fund || npm install --no-audit --no-fund
-          npx remotion render "$ENTRY" "$COMP" out/video-hd.mp4 --scale="$SCALE" --codec=h264 --crf="$CRF" --audio-codec=aac
-          ls -lh out
-
-      - name: Unggah hasil
-        uses: actions/upload-artifact@v4
-        with:
-          name: render-hd
-          path: out/*
-          retention-days: 7
-          compression-level: 0
-</script>
-<script type="text/plain" id="wfReadme">
-# Kit Render Server (GitHub Actions)
-
-Render video HD (1080p / 1440p / 4K, 24-60 fps) tanpa PC dan tanpa batas waktu real-time.
-
-## Langkah (cukup dari HP)
-1. Buat repo GitHub baru (private juga boleh).
-2. Buat file `.github/workflows/render.yml` (tombol "Add file > Create new file", ketik path lengkapnya, tempel isi workflow). Atau upload isi ZIP ini kalau alatmu mendukung folder.
-3. Taruh video di folder `input/` (maks 25 MB lewat web GitHub). Video besar: upload ke tempat lain dan isi `video_url` (link langsung) saat menjalankan.
-4. `input/narration.wav` sudah ada kalau kamu mengunduh kit setelah membuat suara di VoiceReel Studio.
-5. Buka tab Actions > "Render Video HD" > Run workflow, pilih opsi, tunggu selesai.
-6. Unduh hasil dari bagian Artifacts di halaman run (nama: render-hd).
-
-## Mode
-- ffmpeg: video jadi + narasi digabung, di-scale (lanczos), FPS diatur, H.264 + AAC. Kalau narasi lebih panjang, frame terakhir ditahan.
-- remotion: proyek Remotion ada di root repo (package.json, src/...). Isi remotion_entry dan remotion_comp. Narasi dipasang lewat komponen Audio dari paket voice-over (folder public/).
-
-## Catatan
-- Artifact disimpan 7 hari. Menaikkan FPS tidak menambah detail jika sumbernya FPS lebih rendah.
-- Repo public bebas menit Actions; repo private memakai kuota gratis bulananmu.
-</script>
 
 <script>
 const $=id=>document.getElementById(id);
@@ -364,13 +190,21 @@ async function ttsEleven(text){
 }
 
 function layout(){
-  let t=+$("offset").value||0;const g=+$("gap").value||0;
-  segs.forEach(s=>{s.start=t;t+=s.buf.duration+g});
-  segs.total=segs.length?segs[segs.length-1].start+segs[segs.length-1].buf.duration:0;
-  const f=x=>x.toFixed(2)+"s";
-  $("segs").innerHTML=segs.map((s,i)=>`<div class="seg"><span class="t">${f(s.start)}–${f(s.start+s.buf.duration)}</span><span class="tx">${s.text.replace(/</g,"&lt;")}</span><button class="sec" data-i="${i}">▶</button></div>`).join("");
-  $("segs").querySelectorAll("button").forEach(b=>b.onclick=()=>{const s=ctx().createBufferSource();s.buffer=segs[b.dataset.i].buf;s.connect(ctx().destination);s.start()});
-  $("pack").disabled=!segs.length;$("render").disabled=!(segs.length&&hasSrc());
+  let cur=+$("offset").value||0;const g=+$("gap").value||0;
+  segs.forEach(s=>{s.start=(s.manual!=null)?s.manual:cur;cur=s.start+s.buf.duration+g});
+  segs.total=segs.length?Math.max(...segs.map(s=>s.start+s.buf.duration)):0;
+  const f=x=>x.toFixed(1)+"s";
+  $("segs").innerHTML=segs.map((s,i)=>`<div class="seg" style="flex-wrap:wrap"><span class="t">${f(s.start)}–${f(s.start+s.buf.duration)}${s.manual!=null?" ✎":""}</span><span class="tx">${s.text.replace(/</g,"&lt;")}</span><span style="display:flex;gap:6px;width:100%"><button class="sec" data-a="m" data-i="${i}">−0.1</button><button class="sec" data-a="p" data-i="${i}">+0.1</button><button class="sec" data-a="n" data-i="${i}">📍</button><button class="sec" data-a="l" data-i="${i}">🔊</button></span></div>`).join("");
+  $("segs").querySelectorAll("button").forEach(b=>b.onclick=()=>{
+    const s=segs[+b.dataset.i],a=b.dataset.a;
+    if(a==="l"){const n=ctx().createBufferSource();n.buffer=s.buf;n.connect(ctx().destination);n.start();return}
+    if(a==="m")s.manual=s.start-0.1;
+    if(a==="p")s.manual=s.start+0.1;
+    if(a==="n")s.manual=v.currentTime;
+    layout();
+  });
+  $("dl").disabled=!segs.length;
+  if(!v.paused)startNar();
 }
 $("gap").oninput=$("offset").oninput=()=>segs.length&&layout();
 
@@ -390,168 +224,42 @@ $("gen").onclick=async()=>{
   $("gen").disabled=false;
 };
 
-/* video / zip */
-let srcType=null,seq=null;
-const hasSrc=()=>!!(videoURL||seq);
-const nat=(a,b)=>a.localeCompare(b,undefined,{numeric:true});
-$("vfile").onchange=async e=>{
-  const f=e.target.files[0];if(!f)return;
-  $("zinfo").textContent="";lastZipProject=false;seq=null;srcType=null;let blob=f;
-  const pv=$("vprev");
-  if(/\.zip$/i.test(f.name)){
-    try{
-      const z=await JSZip.loadAsync(f);
-      const names=Object.keys(z.files).filter(n=>!z.files[n].dir&&!/(^|\/)(__MACOSX|\.)/.test(n));
-      const vid=names.find(n=>/\.(mp4|webm|mov|m4v)$/i.test(n));
-      const pj=names.find(n=>/(^|\/)package\.json$/.test(n));
-      if(pj&&/remotion/.test(await z.files[pj].async("string")))lastZipProject=true;
-      const imgs=names.filter(n=>/\.(png|jpe?g|webp)$/i.test(n)).sort(nat);
-      if(vid){
-        const b=await z.files[vid].async("blob");
-        blob=new Blob([b],{type:/webm$/i.test(vid)?"video/webm":"video/mp4"});
-        $("zinfo").innerHTML=`<span class="ok">Video ditemukan di ZIP: ${vid}</span>`;
-      }else if(imgs.length>=2&&!lastZipProject){
-        seq={z,names:imgs};srcType="seq";
-        if(videoURL){URL.revokeObjectURL(videoURL);videoURL=null}
-        pv.classList.add("hide");
-        const bm=await createImageBitmap(await z.files[imgs[0]].async("blob"));
-        $("zinfo").innerHTML=`<span class="ok">Urutan gambar: ${imgs.length} frame, ${bm.width}x${bm.height} (${imgs[0]} … ${imgs[imgs.length-1]})</span><br>Durasi = jumlah frame / FPS yang kamu pilih.`;
-        bm.close();layout();return;
-      }else{
-        $("zinfo").innerHTML=lastZipProject?`<span class="er">ZIP ini proyek Remotion (kode), belum ada video jadi.</span> Render dulu dengan <code>npx remotion render</code> (atau <code>--sequence</code> untuk urutan gambar), lalu upload hasilnya. Atau pakai Paket Voice-over di bagian 4.`:`<span class="er">Tidak ada video atau urutan gambar di ZIP (${names.length} file).</span>`;
-        layout();return;
-      }
-    }catch(err){$("zinfo").textContent="ZIP gagal dibaca: "+err.message;return}
-  }
-  if(videoURL)URL.revokeObjectURL(videoURL);
-  videoURL=URL.createObjectURL(blob);srcType="video";
-  pv.src=videoURL;pv.classList.remove("hide");layout();
-};
-
-/* render HD */
-$("render").onclick=async()=>{
-  const btn=$("render");btn.disabled=true;$("out").innerHTML="";$("rbar").style.width="0";
-  let tick=null,drawTimer=null;
-  try{
-    const ac=ctx();await ac.resume();
-    const fps=+$("rFps").value,res=+$("rRes").value,br=+$("rBr").value*1e6;
-    const dest=ac.createMediaStreamDestination();
-    const ng=ac.createGain();ng.gain.value=+$("narVol").value;ng.connect(dest);
-    let v=null,sw,sh,n=0,get=null,frames=null;
-    if(srcType==="seq"){
-      n=seq.names.length;frames=new Map();
-      get=i=>{if(!frames.has(i))frames.set(i,seq.z.files[seq.names[i]].async("blob").then(b=>createImageBitmap(b)));return frames.get(i)};
-      const f0=await get(0);sw=f0.width;sh=f0.height;
-    }else{
-      v=document.createElement("video");v.src=videoURL;v.playsInline=true;v.preload="auto";
-      await new Promise((r,j)=>{v.onloadedmetadata=r;v.onerror=()=>j(new Error("Video tidak bisa dimuat"))});
-      sw=v.videoWidth;sh=v.videoHeight;
-      const msrc=ac.createMediaElementSource(v);const og=ac.createGain();og.gain.value=+$("origVol").value;msrc.connect(og);og.connect(dest);
-    }
-    let W,H;
-    if(res===0){W=sw;H=sh}
-    else if(sw>=sh){H=res;W=Math.round(res*sw/sh)}
-    else{W=res;H=Math.round(res*sh/sw)}
-    W+=W%2;H+=H%2;
-    const cv=document.createElement("canvas");cv.width=W;cv.height=H;
-    const c2=cv.getContext("2d",{alpha:false});c2.imageSmoothingEnabled=true;c2.imageSmoothingQuality="high";
-    if(v)c2.drawImage(v,0,0,W,H);else c2.drawImage(await get(0),0,0,W,H);
-    const stream=new MediaStream([...cv.captureStream(fps).getVideoTracks(),...dest.stream.getAudioTracks()]);
-    const mimes=["video/mp4;codecs=avc1.640033,mp4a.40.2","video/mp4;codecs=avc1.640028,mp4a.40.2","video/mp4;codecs=avc1,mp4a.40.2","video/mp4","video/webm;codecs=vp9,opus","video/webm;codecs=vp8,opus","video/webm"];
-    const mime=mimes.find(m=>MediaRecorder.isTypeSupported(m))||"";
-    const rec=new MediaRecorder(stream,mime?{mimeType:mime,videoBitsPerSecond:br,audioBitsPerSecond:192000}:{videoBitsPerSecond:br});
-    const chunks=[];rec.ondataavailable=e=>e.data.size&&chunks.push(e.data);
-    const done=new Promise(r=>rec.onstop=r);
-    const narTotal=segs.total||0;
-    const total=Math.max(v?v.duration:n/fps,narTotal);
-    rec.start(500);
-    let t0;
-    if(v){v.currentTime=0;await v.play();t0=ac.currentTime;drawTimer=setInterval(()=>c2.drawImage(v,0,0,W,H),1000/(fps*2))}
-    else t0=ac.currentTime;
-    segs.forEach(s=>{const b=ac.createBufferSource();b.buffer=s.buf;b.connect(ng);b.start(t0+s.start)});
-    const show=()=>{const t=Math.min(total,ac.currentTime-t0);$("rbar").style.width=(t/total*100)+"%";$("rlog").textContent=`Merender ${W}x${H} @ ${fps}fps — ${t.toFixed(1)} / ${total.toFixed(1)} dtk`};
-    tick=setInterval(show,250);
-    if(v){
-      await new Promise(r=>v.onended=r);
-    }else{
-      let last=-1;
-      while(ac.currentTime-t0<total){
-        const i=Math.min(n-1,Math.floor((ac.currentTime-t0)*fps));
-        if(i!==last){
-          c2.drawImage(await get(i),0,0,W,H);last=i;
-          for(let k=1;k<=6;k++)if(i+k<n)get(i+k);
-          for(const [key,p] of frames)if(key<i-2){frames.delete(key);p.then(b=>b.close())}
-        }
-        await new Promise(r=>{let d=0;const f=()=>{if(!d){d=1;r()}};requestAnimationFrame(f);setTimeout(f,40)});
-      }
-    }
-    const rest=total-(ac.currentTime-t0);if(rest>0)await new Promise(r=>setTimeout(r,rest*1000+300));
-    clearInterval(tick);clearInterval(drawTimer);rec.stop();await done;if(v)v.pause();
-    const type=rec.mimeType||"video/webm";const ext=type.includes("mp4")?"mp4":"webm";
-    const url=URL.createObjectURL(new Blob(chunks,{type}));
-    $("rbar").style.width="100%";
-    $("rlog").innerHTML=`<span class="ok">Selesai: ${W}x${H} @ ${fps}fps, ${ext.toUpperCase()}</span>`;
-    $("out").innerHTML=`<video src="${url}" controls playsinline style="margin-top:10px"></video><a href="${url}" download="render-${H}p${fps}.${ext}"><button type="button">Unduh Video (.${ext})</button></a>`;
-  }catch(e){clearInterval(tick);clearInterval(drawTimer);$("rlog").innerHTML=`<span class="er">Gagal: ${e.message}. Kalau resolusi tinggi (4K), coba turunkan ke 1440p/1080p.</span>`}
-  btn.disabled=!hasSrc();
-};
-
-/* paket voice-over */
-$("pack").onclick=async()=>{
-  if(!segs.length)return;
-  const z=new JSZip(),rate=ctx().sampleRate,fps=30;
-  const total=Math.ceil((segs.total+0.5)*rate),mix=new Float32Array(total);
-  const tim=[];
-  segs.forEach((s,i)=>{
-    const d=s.buf.getChannelData(0),o=Math.round(s.start*rate);
-    for(let k=0;k<d.length&&o+k<total;k++)mix[o+k]+=d[k];
-    const name=`seg-${String(i+1).padStart(2,"0")}.wav`;
-    z.file("public/voice/"+name,f32ToWav(d,s.buf.sampleRate));
-    tim.push({index:i+1,text:s.text,file:"voice/"+name,startSec:+s.start.toFixed(3),durationSec:+s.buf.duration.toFixed(3),startFrame:Math.round(s.start*fps),durationFrames:Math.ceil(s.buf.duration*fps)});
+/* video + sinkron */
+const v=$("vprev");
+let narGain=null,live=[];
+function gain(){if(!narGain){narGain=ctx().createGain();narGain.connect(ctx().destination)}narGain.gain.value=+$("narVol").value;return narGain}
+function stopNar(){live.forEach(n=>{try{n.stop()}catch(e){}});live=[]}
+function startNar(){
+  stopNar();if(!segs.length)return;
+  const ac=ctx(),g=gain(),t=v.currentTime,now=ac.currentTime;
+  segs.forEach(s=>{
+    if(s.start+s.buf.duration<=t)return;
+    const n=ac.createBufferSource();n.buffer=s.buf;n.connect(g);
+    const wait=s.start-t;
+    if(wait>=0)n.start(now+wait);else n.start(now,-wait);
+    live.push(n);
   });
-  z.file("public/narration.wav",f32ToWav(mix,rate));
-  z.file("public/timings.json",JSON.stringify({fps,totalSec:+segs.total.toFixed(3),segments:tim},null,2));
-  z.file("REMOTION_USAGE.txt",`Salin folder public/ ke proyek Remotion.
-
-Satu file narasi penuh:
-  import {Audio, staticFile} from "remotion";
-  <Audio src={staticFile("narration.wav")} />
-
-Per segmen (tepat per frame, fps ${fps}):
-  import {Sequence, Audio, staticFile} from "remotion";
-  import t from "../public/timings.json";
-  {t.segments.map(s=>(
-    <Sequence key={s.index} from={s.startFrame} durationInFrames={s.durationFrames}>
-      <Audio src={staticFile(s.file)} />
-    </Sequence>
-  ))}
-
-Atur durationInFrames komposisi >= ${Math.ceil(segs.total*fps)} frame.
-Lalu: npx remotion render src/index.ts MyComp out.mp4
-`);
-  const b=await z.generateAsync({type:"blob"});
-  const a=document.createElement("a");a.href=URL.createObjectURL(b);a.download="voiceover-pack.zip";a.click();
-};
-/* kit render server */
-const wfText=()=>$("wfYml").textContent.replace(/^\n/,"");
-function mixNarration(){
-  const rate=ctx().sampleRate,total=Math.ceil((segs.total+0.5)*rate),mix=new Float32Array(total);
-  segs.forEach(s=>{const d=s.buf.getChannelData(0),o=Math.round(s.start*rate);for(let k=0;k<d.length&&o+k<total;k++)mix[o+k]+=d[k]});
-  return {mix,rate};
 }
-$("kitBtn").onclick=async()=>{
-  const z=new JSZip();
-  z.file(".github/workflows/render.yml",wfText());
-  z.file("README.md",$("wfReadme").textContent.replace(/^\n/,""));
-  z.file("input/.gitkeep","");
-  if(segs.length){const m=mixNarration();z.file("input/narration.wav",f32ToWav(m.mix,m.rate))}
-  const b=await z.generateAsync({type:"blob"});
-  const a=document.createElement("a");a.href=URL.createObjectURL(b);a.download="render-kit.zip";a.click();
-  $("kitlog").textContent=segs.length?"Kit diunduh (termasuk narration.wav).":"Kit diunduh (tanpa narasi, buat suara dulu kalau mau disertakan).";
+v.addEventListener("playing",()=>{ctx().resume();startNar()});
+v.addEventListener("pause",stopNar);
+v.addEventListener("waiting",stopNar);
+v.addEventListener("seeking",stopNar);
+v.addEventListener("ended",stopNar);
+v.addEventListener("ratechange",()=>{if(v.playbackRate!==1)v.playbackRate=1});
+$("origVol").oninput=()=>{v.volume=+$("origVol").value};
+$("narVol").oninput=()=>{gain()};
+v.volume=+$("origVol").value;
+$("vfile").onchange=e=>{
+  const f=e.target.files[0];if(!f)return;
+  if(videoURL)URL.revokeObjectURL(videoURL);
+  videoURL=URL.createObjectURL(f);v.src=videoURL;v.classList.remove("hide");
 };
-$("copyWf").onclick=async()=>{
-  try{await navigator.clipboard.writeText(wfText());$("kitlog").innerHTML='<span class="ok">Workflow disalin. Tempel ke .github/workflows/render.yml</span>'}
-  catch(e){$("kitlog").innerHTML='<span class="er">Gagal menyalin, pakai tombol unduh kit.</span>'}
+$("resetAdj").onclick=()=>{segs.forEach(s=>s.manual=null);layout()};
+$("dl").onclick=()=>{
+  if(!segs.length)return;
+  const rate=ctx().sampleRate,total=Math.ceil((segs.total+0.5)*rate),mix=new Float32Array(total),vol=+$("narVol").value;
+  segs.forEach(s=>{const d=s.buf.getChannelData(0),o=Math.round(s.start*rate);for(let k=0;k<d.length;k++){const i=o+k;if(i>=0&&i<total)mix[i]+=d[k]*vol}});
+  const a=document.createElement("a");a.href=URL.createObjectURL(f32ToWav(mix,rate));a.download="narasi-sinkron.wav";a.click();
 };
 </script>
 </body>
