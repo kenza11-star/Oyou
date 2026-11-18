@@ -44,7 +44,7 @@ export default function Dashboard() {
           />
           <div className="stack">
             <section className="tg-hero" aria-label="Pengiriman terakhir">
-              <SendFlow state={flow} />
+              <SendFlow state={flow} pct={pct ?? undefined} />
               <div className="tg-hero-line">
                 <span className="tg-repo">{latest ? latest.repoFullName : (me.data.selection?.repoFullName ?? "Belum ada repositori")}</span>
                 {latestInfo && <span className={`badge ${latestInfo.tone === "idle" ? "" : latestInfo.tone}`}>{latestInfo.label}</span>}

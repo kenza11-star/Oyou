@@ -4,6 +4,7 @@ import { useEffect, useId, useRef, useState, type CSSProperties, type PointerEve
 import { formatBytes, formatTime, jobProgress, statusInfo } from "@/lib/web/format";
 import { useSession, ApiFail } from "./session";
 import type { Job } from "./hooks";
+import { Banner } from "./banner";
 export { SendFlow, type FlowState } from "./send-flow";
 
 const P: Record<string, string> = {
@@ -81,68 +82,7 @@ function useGithubProfile(login: string): GhProfile | null {
   return p;
 }
 
-/** Bubble-gum banner: gooey pink blobs that squash and stretch, a bubble that inflates and pops, and a blob that follows your finger. */
-function GumBanner({ chip }: { chip?: string | null }) {
-  const fid = `gum${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
-  const root = useRef<HTMLDivElement>(null);
-  const touch = useRef<HTMLElement | null>(null);
-  const st = useRef({ x: 0, y: 0, vx: 0, vy: 0, tx: 0, ty: 0, raf: 0, on: false });
-  const loop = () => {
-    const s = st.current, el = touch.current;
-    if (!el) return;
-    s.vx = (s.vx + (s.tx - s.x) * 0.16) * 0.78;
-    s.vy = (s.vy + (s.ty - s.y) * 0.16) * 0.78;
-    s.x += s.vx; s.y += s.vy;
-    const stretch = Math.min(0.35, Math.hypot(s.vx, s.vy) / 40);
-    const ang = Math.atan2(s.vy, s.vx);
-    el.style.transform = `translate(${s.x - 36}px, ${s.y - 36}px) rotate(${ang}rad) scale(${1 + stretch}, ${1 - stretch * 0.7})`;
-    if (s.on || Math.hypot(s.vx, s.vy) > 0.05) s.raf = requestAnimationFrame(loop);
-    else s.raf = 0;
-  };
-  const aim = (e: ReactPointerEvent<HTMLDivElement>, down: boolean) => {
-    const r = root.current?.getBoundingClientRect();
-    if (!r) return;
-    const s = st.current;
-    s.tx = e.clientX - r.left; s.ty = e.clientY - r.top;
-    if (down) { s.x = s.tx; s.y = s.ty; s.vx = s.vy = 0; s.on = true; root.current?.classList.add("touching"); }
-    if (s.on && !s.raf) s.raf = requestAnimationFrame(loop);
-  };
-  const release = () => {
-    st.current.on = false;
-    root.current?.classList.remove("touching");
-  };
-  useEffect(() => () => cancelAnimationFrame(st.current.raf), []);
-  return (
-    <div
-      ref={root}
-      className="banner gum"
-      aria-hidden="true"
-      onPointerDown={(e) => aim(e, true)}
-      onPointerMove={(e) => st.current.on && aim(e, false)}
-      onPointerUp={release}
-      onPointerLeave={release}
-      onPointerCancel={release}
-    >
-      <svg width="0" height="0" style={{ position: "absolute" }} focusable="false">
-        <defs>
-          <filter id={fid} x="-20%" y="-40%" width="140%" height="180%" colorInterpolationFilters="sRGB">
-            <feGaussianBlur in="SourceGraphic" stdDeviation="9" result="b" />
-            <feColorMatrix in="b" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 24 -10" />
-          </filter>
-        </defs>
-      </svg>
-      <div className="goo" style={{ filter: `url(#${fid})` }}>
-        <b /><b /><b /><b /><b />
-        <i ref={touch} className="touch" />
-      </div>
-      <span className="bubble" />
-      <span className="shine" />
-      {chip && <span className="chip"><Icon name="repo" /><span>{chip}</span></span>}
-    </div>
-  );
-}
-
-/** Profile card: GitHub avatar and name, a bubble-gum banner, three stats and one call to action. Tilts toward the pointer. */
+/** Profile card: GitHub avatar and name, a banner, three stats and one call to action. Tilts toward the pointer. */
 export function ProfileCard({ login, subtitle, chip, caption, stats, cta, side }: {
   login: string; subtitle: string; chip?: string | null; caption?: string; stats: ProfileStat[];
   cta: ProfileLink; side?: ProfileLink & { icon: keyof typeof P };
@@ -170,7 +110,9 @@ export function ProfileCard({ login, subtitle, chip, caption, stats, cta, side }
   };
   return (
     <article ref={ref} className="pcard" onPointerMove={move} onPointerLeave={leave} aria-label={`Profil ${login}`}>
-      <GumBanner chip={chip} />
+      <Banner login={login}>
+        {chip && <span className="chip"><Icon name="repo" /><span>{chip}</span></span>}
+      </Banner>
       <div className="who-row">
         <div className="avatar">
           {imgOk

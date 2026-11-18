@@ -4,6 +4,7 @@ import Uploader from "@/app/upload/uploader";
 import { useSession, ApiFail } from "../session";
 import { useApi, type Me } from "../hooks";
 import { ErrorNotice, NotLinked } from "../ui";
+import { Pick } from "../pick";
 
 interface Repo { id: number; fullName: string; defaultBranch: string; private: boolean }
 
@@ -14,6 +15,9 @@ export default function UploadPage() {
   const [repoId, setRepoId] = useState<number | null>(null);
   const [branches, setBranches] = useState<string[]>([]);
   const [branch, setBranch] = useState("");
+  const [auto, setAuto] = useState("main");
+  const [custom, setCustom] = useState(false);
+  const [draft, setDraft] = useState("");
   const [token, setToken] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadingBranches, setLoadingBranches] = useState(false);
@@ -24,7 +28,7 @@ export default function UploadPage() {
     const first = repos.data.repos.find((r) => r.id === sel) ?? null;
     if (first) {
       setRepoId(first.id);
-      setBranch(me.data.selection?.branch ?? first.defaultBranch);
+      setBranch("main");
     }
   }, [me.data, repos.data, repoId]);
 
@@ -37,7 +41,10 @@ export default function UploadPage() {
       .then((r) => {
         if (!live) return;
         setBranches(r.branches);
-        setBranch((b) => (b && r.branches.includes(b) ? b : r.defaultBranch));
+        const a = r.branches.includes("main") ? "main" : r.defaultBranch;
+        setAuto(a);
+        setCustom(false);
+        setBranch(a);
         setError(null);
       })
       .catch((e) => live && setError(e instanceof ApiFail ? e.message : "Gagal memuat branch."))
@@ -58,7 +65,7 @@ export default function UploadPage() {
   const notLinked = me.data && !me.data.github;
   return (
     <div className="stack">
-      <div className="page-head"><div><h1>Unggah ZIP</h1><p>Kirim proyek ke repositori GitHub. Maksimal 100 MiB per arsip.</p></div></div>
+      <div className="page-head"><div><h1>Unggah</h1><p>Maks 100 MiB.</p></div></div>
       <ErrorNotice error={me.error ?? repos.error} />
       {notLinked && <NotLinked installUrl={me.data?.installUrl} />}
       {me.data?.github && (
@@ -68,24 +75,31 @@ export default function UploadPage() {
             <div className="body grid2">
               <div className="field">
                 <label htmlFor="repo">Repositori</label>
-                <select id="repo" value={repoId ?? ""} onChange={(e) => setRepoId(e.target.value ? Number(e.target.value) : null)}>
-                  <option value="">{repos.loading ? "Memuat…" : "Pilih repositori"}</option>
-                  {repos.data?.repos.map((r) => <option key={r.id} value={r.id}>{r.fullName}{r.private ? " (privat)" : ""}</option>)}
-                </select>
+                <Pick
+                  id="repo"
+                  value={repoId === null ? "" : String(repoId)}
+                  loading={repos.loading}
+                  placeholder="Pilih repositori"
+                  options={(repos.data?.repos ?? []).map((r) => ({ value: String(r.id), label: r.fullName, hint: r.private ? "privat" : undefined }))}
+                  onChange={(v) => setRepoId(v ? Number(v) : null)}
+                />
               </div>
               <div className="field">
                 <label htmlFor="branch">Branch</label>
-                <select id="branch" value={branch} disabled={repoId === null || loadingBranches} onChange={(e) => setBranch(e.target.value)}>
-                  {branches.length === 0 && <option value="">{repoId === null ? "Pilih repositori dulu" : "Memuat…"}</option>}
-                  {branches.map((b) => <option key={b} value={b}>{b}</option>)}
-                </select>
+                <div className="seg br" role="radiogroup" aria-label="Branch">
+                  <button type="button" role="radio" aria-checked={!custom} className={!custom ? "on" : ""} disabled={repoId === null || loadingBranches} onClick={() => { setCustom(false); setBranch(auto); }}>{auto}</button>
+                  <button type="button" role="radio" aria-checked={custom} className={custom ? "on" : ""} disabled={repoId === null || loadingBranches} onClick={() => setCustom(true)}>Custom</button>
+                </div>
+                {custom && (
+                  <form className="brform" onSubmit={(e) => { e.preventDefault(); const v = draft.trim(); if (v) setBranch(v); }}>
+                    <input id="branch" type="text" value={draft} placeholder="nama-branch" autoCapitalize="none" autoCorrect="off" spellCheck={false} onChange={(e) => setDraft(e.target.value)} />
+                    <button className="btn primary" type="submit" disabled={!draft.trim() || draft.trim() === branch}>Pakai</button>
+                  </form>
+                )}
               </div>
             </div>
             <div className="body" style={{ paddingTop: 0 }}>
-              <p className="muted">
-                Cara kerja pembaruan: file dengan path yang sama ditimpa, file baru ditambahkan, dan file lain di repositori dipertahankan. Tidak ada file yang dihapus.
-                Perubahan hanya dinyatakan selesai setelah GitHub mengonfirmasi commit. Hanya repositori yang diizinkan GitHub App Anda yang tampil di sini.
-              </p>
+              <p className="muted">File sama ditimpa, file baru ditambah, sisanya tetap.</p>
               {repos.data && repos.data.repos.length === 0 && (
                 <p style={{ marginTop: 8 }}>Belum ada repositori. <a href={me.data.installUrl} target="_blank" rel="noreferrer">Instal GitHub App</a> pada repositori yang ingin dikelola.</p>
               )}
@@ -93,7 +107,7 @@ export default function UploadPage() {
           </section>
           <ErrorNotice error={error} />
           {token ? <Uploader initialToken={token} embedded key={token} /> : repoId !== null && !error && <div className="empty">Menyiapkan sesi unggah…</div>}
-          {token && <p className="dim">Sesi unggah berlaku 30 menit. Jika kedaluwarsa, pilih ulang branch untuk membuat sesi baru.</p>}
+          {token && <p className="dim">Sesi berlaku 30 menit.</p>}
         </>
       )}
     </div>

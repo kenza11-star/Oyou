@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { SendFlow } from "../app/send-flow";
+import { buildArchive, fromDrop, fromFolderInput, type PickedItem } from "@/lib/upload/package";
 import {
   AdaptiveConcurrency,
   HttpError,
@@ -288,6 +289,9 @@ export default function Uploader({
   const [concurrency, setConcurrency] = useState(START_CONCURRENCY);
   const [chunksDone, setChunksDone] = useState(0);
   const [errorText, setErrorText] = useState<string | null>(null);
+  const [mode, setMode] = useState<"file" | "folder">("file");
+  const [strip, setStrip] = useState(false);
+  const [packing, setPacking] = useState(false);
 
   const resumeStorageRef = useRef<string | null>(null);
   const jobRef = useRef<JobSummary | null>(null);
@@ -661,8 +665,23 @@ export default function Uploader({
   const chunkTotal = job?.chunkCount ?? 0;
 
   const [over, setOver] = useState(false);
-  const pick = (f?: File | null) => {
-    if (f) void start(f);
+  const pickItems = async (items: PickedItem[], folderName?: string) => {
+    if (items.length === 0 || busy || packing) return;
+    const raw = items.reduce((n, i) => n + i.file.size, 0);
+    if (raw > UPLOAD_LIMITS.webArchiveBytes) {
+      setErrorText(`Ukuran ${(raw / MB).toFixed(1)} MB. Batas unggahan browser adalah 100 MB.`);
+      return;
+    }
+    setErrorText(null);
+    setPacking(true);
+    try {
+      const archive = await buildArchive(items, { strip, folderName });
+      void start(archive);
+    } catch {
+      setErrorText("Gagal menyiapkan file.");
+    } finally {
+      setPacking(false);
+    }
   };
   const statusText =
     phase === "preparing" ? "Menyiapkan…"
@@ -684,13 +703,7 @@ export default function Uploader({
           <span className="mark" aria-hidden="true">K</span>Kyn-X
         </a>
       )}
-      {!embedded && <h1>Unggah proyek ZIP</h1>}
-      {!embedded && (
-        <p className="lead">
-          Kirim file ZIP proyekmu langsung ke repositori GitHub. Hanya file baru dan file yang berubah yang di-commit;
-          tidak ada file yang dihapus.
-        </p>
-      )}
+      {!embedded && <h1>Unggah</h1>}
 
       {notice && (
         <p className="info" role="alert">
@@ -706,37 +719,71 @@ export default function Uploader({
 
       {token && (
         <>
+          <div className="picker" role="group" aria-label="Opsi unggah">
+            <div className="seg" role="radiogroup" aria-label="Jenis pilihan">
+              <button type="button" role="radio" aria-checked={mode === "file"} className={mode === "file" ? "on" : ""} disabled={busy || packing} onClick={() => setMode("file")}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Z" /><path d="M14 3v5h5" /></svg>
+                File
+              </button>
+              <button type="button" role="radio" aria-checked={mode === "folder"} className={mode === "folder" ? "on" : ""} disabled={busy || packing} onClick={() => setMode("folder")}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" /></svg>
+                Folder
+              </button>
+            </div>
+            <button type="button" role="switch" aria-checked={strip} className={`sw${strip ? " on" : ""}`} disabled={busy || packing} onClick={() => setStrip((v) => !v)}>
+              <span className="knob" aria-hidden="true" />
+              <span>Hapus folder luar</span>
+            </button>
+          </div>
+
           <label
-            className={`drop${over ? " over" : ""}${busy || !scope ? " disabled" : ""}`}
+            className={`drop${over ? " over" : ""}${busy || packing || !scope ? " disabled" : ""}`}
             onDragOver={(e) => {
               e.preventDefault();
-              if (!busy && scope) setOver(true);
+              if (!busy && !packing && scope) setOver(true);
             }}
             onDragLeave={() => setOver(false)}
             onDrop={(e) => {
               e.preventDefault();
               setOver(false);
-              if (!busy && scope) pick(e.dataTransfer?.files?.[0]);
+              if (busy || packing || !scope || !e.dataTransfer) return;
+              void fromDrop(e.dataTransfer).then((r) => pickItems(r.items, r.folderName));
             }}
           >
             <input
+              key={mode}
               aria-label="Pilih file ZIP atau pilih file yang sama untuk melanjutkan"
               type="file"
-              accept=".zip,application/zip"
-              disabled={busy || !scope}
+              multiple
+              disabled={busy || packing || !scope}
+              ref={(el) => {
+                if (!el) return;
+                if (mode === "folder") {
+                  el.setAttribute("webkitdirectory", "");
+                  el.setAttribute("directory", "");
+                } else {
+                  el.removeAttribute("webkitdirectory");
+                  el.removeAttribute("directory");
+                }
+              }}
               onChange={(e) => {
-                const f = e.target.files?.[0];
+                const picked = Array.from(e.target.files ?? []);
                 e.target.value = "";
-                pick(f);
+                if (mode === "folder") {
+                  const r = fromFolderInput(picked);
+                  void pickItems(r.items, r.folderName);
+                } else {
+                  void pickItems(picked.map((f) => ({ file: f, path: f.name })));
+                }
               }}
             />
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M12 16V4m0 0l-4 4m4-4l4 4" />
               <path d="M4 15v3a2 2 0 002 2h12a2 2 0 002-2v-3" />
             </svg>
-            <strong>Seret &amp; lepas file ZIP di sini</strong>
-            <span>atau ketuk untuk memilih file</span>
-            <span className="hint">.zip · maksimal 100 MiB</span>
+            <strong>{packing ? "Menyiapkan…" : mode === "folder" ? "Pilih folder" : "Pilih file"}</strong>
+            <span>atau seret ke sini</span>
+            <span className="hint">Semua jenis file · maks 100 MiB</span>
           </label>
 
           {target && (
@@ -755,7 +802,7 @@ export default function Uploader({
 
           {phase !== "idle" && (
             <div className="card">
-              <SendFlow state={phase === "completed" ? "ok" : phase === "error" ? "bad" : phase === "cancelled" ? "stopped" : "sending"} />
+              <SendFlow state={phase === "completed" ? "ok" : phase === "error" ? "bad" : phase === "cancelled" ? "stopped" : "sending"} pct={total > 0 ? pct : undefined} />
               <div className="head">
                 <span className="status">{statusText}</span>
                 <span className="big">{total > 0 ? `${pct}%` : "—"}</span>

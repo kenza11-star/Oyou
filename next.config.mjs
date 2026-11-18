@@ -19,7 +19,7 @@ const nextConfig = {
           {
             key: "Content-Security-Policy",
             value:
-              `default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://avatars.githubusercontent.com; connect-src 'self' ${supabaseOrigin} https://api.github.com; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`,
+              `default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://avatars.githubusercontent.com; media-src 'self' blob:; connect-src 'self' ${supabaseOrigin} https://api.github.com; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`,
           },
           {
             key: "Permissions-Policy",

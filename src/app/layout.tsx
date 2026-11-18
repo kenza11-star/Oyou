@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import { Ripple } from "./app/ripple";
 
 export const metadata: Metadata = {
   title: { default: "Kyn-X · GitHub Manager", template: "%s · Kyn-X" },
@@ -11,7 +12,7 @@ export const viewport: Viewport = { width: "device-width", initialScale: 1, them
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="id">
-      <body>{children}</body>
+      <body>{children}<Ripple /></body>
     </html>
   );
 }
