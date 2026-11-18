@@ -1,9 +1,10 @@
 "use client";
 import Link from "next/link";
-import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { formatBytes, formatTime, jobProgress, statusInfo } from "@/lib/web/format";
 import { useSession, ApiFail } from "./session";
 import type { Job } from "./hooks";
+export { SendFlow, type FlowState } from "./send-flow";
 
 const P: Record<string, string> = {
   home: "M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z",
@@ -55,22 +56,102 @@ export function CountUp({ value }: { value: number }) {
 export interface ProfileStat { icon: keyof typeof P; tone: string; value: number; label: string }
 export interface ProfileLink { label: string; href: string; external?: boolean }
 
-function hueOf(s: string): number {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
-  return h % 360;
+interface GhProfile { avatar: string; name: string | null; bio: string | null; followers: number; repos: number }
+
+/** Public profile straight from GitHub (avatar, name, bio). Cached per tab; failure just falls back to the login. */
+function useGithubProfile(login: string): GhProfile | null {
+  const [p, setP] = useState<GhProfile | null>(null);
+  useEffect(() => {
+    const key = `gm-gh-${login}`;
+    try {
+      const hit = window.sessionStorage.getItem(key);
+      if (hit) { setP(JSON.parse(hit) as GhProfile); return; }
+    } catch { /* optional cache */ }
+    const ctl = new AbortController();
+    fetch(`https://api.github.com/users/${encodeURIComponent(login)}`, { signal: ctl.signal, headers: { accept: "application/vnd.github+json" } })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("gh"))))
+      .then((d: { avatar_url?: string; name?: string | null; bio?: string | null; followers?: number; public_repos?: number }) => {
+        const v: GhProfile = { avatar: d.avatar_url ?? "", name: d.name ?? null, bio: d.bio ?? null, followers: d.followers ?? 0, repos: d.public_repos ?? 0 };
+        setP(v);
+        try { window.sessionStorage.setItem(key, JSON.stringify(v)); } catch { /* optional cache */ }
+      })
+      .catch(() => undefined);
+    return () => ctl.abort();
+  }, [login]);
+  return p;
 }
 
-/** Profile card: animated banner, avatar, identity, three stats and one call to action. Tilts toward the pointer. */
+/** Bubble-gum banner: gooey pink blobs that squash and stretch, a bubble that inflates and pops, and a blob that follows your finger. */
+function GumBanner({ chip }: { chip?: string | null }) {
+  const fid = `gum${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
+  const root = useRef<HTMLDivElement>(null);
+  const touch = useRef<HTMLElement | null>(null);
+  const st = useRef({ x: 0, y: 0, vx: 0, vy: 0, tx: 0, ty: 0, raf: 0, on: false });
+  const loop = () => {
+    const s = st.current, el = touch.current;
+    if (!el) return;
+    s.vx = (s.vx + (s.tx - s.x) * 0.16) * 0.78;
+    s.vy = (s.vy + (s.ty - s.y) * 0.16) * 0.78;
+    s.x += s.vx; s.y += s.vy;
+    const stretch = Math.min(0.35, Math.hypot(s.vx, s.vy) / 40);
+    const ang = Math.atan2(s.vy, s.vx);
+    el.style.transform = `translate(${s.x - 36}px, ${s.y - 36}px) rotate(${ang}rad) scale(${1 + stretch}, ${1 - stretch * 0.7})`;
+    if (s.on || Math.hypot(s.vx, s.vy) > 0.05) s.raf = requestAnimationFrame(loop);
+    else s.raf = 0;
+  };
+  const aim = (e: ReactPointerEvent<HTMLDivElement>, down: boolean) => {
+    const r = root.current?.getBoundingClientRect();
+    if (!r) return;
+    const s = st.current;
+    s.tx = e.clientX - r.left; s.ty = e.clientY - r.top;
+    if (down) { s.x = s.tx; s.y = s.ty; s.vx = s.vy = 0; s.on = true; root.current?.classList.add("touching"); }
+    if (s.on && !s.raf) s.raf = requestAnimationFrame(loop);
+  };
+  const release = () => {
+    st.current.on = false;
+    root.current?.classList.remove("touching");
+  };
+  useEffect(() => () => cancelAnimationFrame(st.current.raf), []);
+  return (
+    <div
+      ref={root}
+      className="banner gum"
+      aria-hidden="true"
+      onPointerDown={(e) => aim(e, true)}
+      onPointerMove={(e) => st.current.on && aim(e, false)}
+      onPointerUp={release}
+      onPointerLeave={release}
+      onPointerCancel={release}
+    >
+      <svg width="0" height="0" style={{ position: "absolute" }} focusable="false">
+        <defs>
+          <filter id={fid} x="-20%" y="-40%" width="140%" height="180%" colorInterpolationFilters="sRGB">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="9" result="b" />
+            <feColorMatrix in="b" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 24 -10" />
+          </filter>
+        </defs>
+      </svg>
+      <div className="goo" style={{ filter: `url(#${fid})` }}>
+        <b /><b /><b /><b /><b />
+        <i ref={touch} className="touch" />
+      </div>
+      <span className="bubble" />
+      <span className="shine" />
+      {chip && <span className="chip"><Icon name="repo" /><span>{chip}</span></span>}
+    </div>
+  );
+}
+
+/** Profile card: GitHub avatar and name, a bubble-gum banner, three stats and one call to action. Tilts toward the pointer. */
 export function ProfileCard({ login, subtitle, chip, caption, stats, cta, side }: {
   login: string; subtitle: string; chip?: string | null; caption?: string; stats: ProfileStat[];
   cta: ProfileLink; side?: ProfileLink & { icon: keyof typeof P };
 }) {
   const [imgOk, setImgOk] = useState(true);
-  const ref = useRef<HTMLDivElement>(null);
-  const h = hueOf(login);
-  const vars = { "--c1": `hsl(${h} 95% 58%)`, "--c2": `hsl(${(h + 42) % 360} 95% 55%)`, "--c3": `hsl(${(h + 200) % 360} 85% 52%)` } as CSSProperties;
-  const move = (e: ReactPointerEvent<HTMLDivElement>) => {
+  const gh = useGithubProfile(login);
+  const ref = useRef<HTMLElement | null>(null);
+  const avatar = gh?.avatar || `https://avatars.githubusercontent.com/${encodeURIComponent(login)}?s=136`;
+  const move = (e: ReactPointerEvent<HTMLElement>) => {
     const el = ref.current;
     if (!el || e.pointerType === "touch") return;
     const r = el.getBoundingClientRect();
@@ -87,30 +168,23 @@ export function ProfileCard({ login, subtitle, chip, caption, stats, cta, side }
     el.style.setProperty("--ty", "0deg");
     el.style.setProperty("--tx", "0deg");
   };
-  const Cta = cta.external ? "a" : Link;
-  const extra = cta.external ? { target: "_blank", rel: "noreferrer" } : {};
-  const Side = side?.external ? "a" : Link;
   return (
-    <article ref={ref} className="pcard" style={vars} onPointerMove={move} onPointerLeave={leave} aria-label={`Profil ${login}`}>
-      <div className="banner" aria-hidden="true">
-        <i /><i /><i />
-        {chip && <span className="chip"><Icon name="repo" /><span>{chip}</span></span>}
-      </div>
+    <article ref={ref} className="pcard" onPointerMove={move} onPointerLeave={leave} aria-label={`Profil ${login}`}>
+      <GumBanner chip={chip} />
       <div className="who-row">
         <div className="avatar">
           {imgOk
             ? // eslint-disable-next-line @next/next/no-img-element
-              <img src={`https://github.com/${encodeURIComponent(login)}.png?size=136`} alt="" width={68} height={68} onError={() => setImgOk(false)} />
+              <img key={avatar} src={avatar} alt="" width={68} height={68} referrerPolicy="no-referrer" onError={() => setImgOk(false)} />
             : <span aria-hidden="true">{login.slice(0, 1).toUpperCase()}</span>}
         </div>
-        {side && (
-          <Side className="btn icon" href={side.href} aria-label={side.label} title={side.label} {...(side.external ? { target: "_blank", rel: "noreferrer" } : {})}>
-            <Icon name={side.icon} />
-          </Side>
-        )}
+        {side && (side.external
+          ? <a className="btn icon" href={side.href} aria-label={side.label} title={side.label} target="_blank" rel="noreferrer"><Icon name={side.icon} /></a>
+          : <Link className="btn icon" href={side.href} aria-label={side.label} title={side.label}><Icon name={side.icon} /></Link>)}
       </div>
-      <h2 className="name">{login}</h2>
-      <p className="sub">{subtitle}</p>
+      <h2 className="name">{gh?.name || login}</h2>
+      <p className="sub">{gh?.name ? `@${login}` : subtitle}{gh ? ` · ${gh.followers} pengikut` : ""}</p>
+      {gh?.bio && <p className="bio">{gh.bio}</p>}
       {caption && <p className="cap">{caption}</p>}
       <div className="pstats">
         {stats.map((s) => (
@@ -121,7 +195,9 @@ export function ProfileCard({ login, subtitle, chip, caption, stats, cta, side }
         ))}
       </div>
       <div className="cta">
-        <Cta className="btn primary block" href={cta.href} {...extra}>{cta.label}</Cta>
+        {cta.external
+          ? <a className="btn primary block" href={cta.href} target="_blank" rel="noreferrer">{cta.label}</a>
+          : <Link className="btn primary block" href={cta.href}>{cta.label}</Link>}
       </div>
     </article>
   );
@@ -169,10 +245,9 @@ export function JobItem({ job, onChanged }: { job: Job; onChanged: () => void })
         <span className={`badge ${info.tone === "idle" ? "" : info.tone}`}>{info.label}</span>
       </div>
       <div className="meta">
-        <span className="mono" title={job.id}>{job.id.slice(0, 8)}</span>
         <span>{job.fileName ?? "ZIP"} · {formatBytes(job.totalBytes)}</span>
-        <span>{formatTime(job.createdAt)}</span>
-        {job.filesTotal != null && <span>{job.filesProcessed}/{job.filesTotal} file · +{job.added} ~{job.updated} ={job.unchanged}</span>}
+        <span title={job.id}>{formatTime(job.createdAt)}</span>
+        {info.open && job.filesTotal != null && <span>{job.filesProcessed}/{job.filesTotal} file</span>}
       </div>
       {info.open && job.status !== "created" && (
         <div
@@ -184,6 +259,7 @@ export function JobItem({ job, onChanged }: { job: Job; onChanged: () => void })
           {...(pct !== null ? { "aria-valuenow": pct } : {})}
         >
           <div style={pct !== null ? { width: `${pct}%` } : undefined} />
+          <i className="fly" aria-hidden="true" style={pct !== null ? { left: `${pct}%` } : undefined} />
         </div>
       )}
       {job.status === "failed" && job.error && <p className="muted" style={{ color: "var(--danger)" }}>{job.error}</p>}

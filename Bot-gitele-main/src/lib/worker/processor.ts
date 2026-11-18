@@ -253,6 +253,107 @@ async function publishAndConfirm(api: WorkerGithub): Promise<void> {
     throw new UserFacingError("GitHub commit confirmation mismatch");
   await finishJob(lease, head);
 }
+
+/** Largest changed payload sent as ONE atomic GraphQL commit (base64 JSON body stays well under GitHub's limits). */
+const FAST_COMMIT_BYTES = 16 * 1024 * 1024;
+const FAST_COMMIT_FILES = 400;
+
+/**
+ * Fast path: one `createCommitOnBranch` request creates blobs, tree, commit and moves the branch atomically.
+ * That is a single budgeted mutation instead of one per file, so a 90-file ZIP no longer stalls on the
+ * per-minute budget. Returns true when the job was finished; false means "use the slower blob/tree path".
+ */
+async function fastCommit(
+  api: WorkerGithub,
+  lease: Lease,
+  files: UploadFile[],
+  changed: FileRecord[],
+): Promise<boolean> {
+  const job = lease.job,
+    repo = repoPath(job.repo_full_name);
+  const readRef = `/repos/${repo}/git/ref/heads/${job.branch.split("/").map(encodeURIComponent).join("/")}`;
+  const adopt = async (oid: string) => {
+    const commit = await api.call<{ sha: string; tree: { sha: string } }>(
+      "GET",
+      `/repos/${repo}/git/commits/${oid}`,
+    );
+    await lease.save({
+      target_tree_sha: commit.tree.sha,
+      commit_sha: commit.sha,
+      commit_url: `https://github.com/${repo}/commit/${commit.sha}`,
+      processing_stage: "updating_branch",
+    });
+    await publishAndConfirm(api);
+  };
+  // A previous attempt may have succeeded right before its response was lost: recognise our own commit.
+  const head = (await api.call<{ object: { sha: string } }>("GET", readRef)).object.sha;
+  if (head !== job.base_head_sha) {
+    const c = await api.call<{ message: string }>("GET", `/repos/${repo}/git/commits/${head}`);
+    if (c.message.includes(`Upload-Job: ${job.id}`)) {
+      await adopt(head);
+      return true;
+    }
+    throw new UserFacingError(
+      "The selected branch changed while comparing. No changes were committed. Upload again.",
+    );
+  }
+  const wait = await reserveMutation(Number(job.telegram_user_id));
+  if (wait > 0) throw new Deferred(Math.ceil(wait) + 500);
+  await lease.save({ processing_stage: "creating_commit" });
+  const byPath = new Map(files.map((f) => [f.path, f.data]));
+  const additions = changed.map((f) => ({
+    path: f.path,
+    contents: Buffer.from(byPath.get(f.path)!).toString("base64"),
+  }));
+  let res: {
+    data?: { createCommitOnBranch?: { commit?: { oid: string } } };
+    errors?: { message: string }[];
+  };
+  try {
+    res = await api.call<{
+    data?: { createCommitOnBranch?: { commit?: { oid: string } } };
+    errors?: { message: string }[];
+  }>(
+    "POST",
+    "/graphql",
+    {
+      query:
+        "mutation($input: CreateCommitOnBranchInput!){createCommitOnBranch(input:$input){commit{oid}}}",
+      variables: {
+        input: {
+          branch: { repositoryNameWithOwner: job.repo_full_name, branchName: job.branch },
+          message: {
+            headline: "Update project via GitHub Manager Bot",
+            body: `Upload-Job: ${job.id}`,
+          },
+          expectedHeadOid: job.base_head_sha,
+          fileChanges: { additions },
+        },
+      },
+    },
+    true,
+  );
+  } catch (err) {
+    // A 4xx means GitHub refused the request and nothing was created: use the classic path.
+    if (err instanceof GithubHttpError && err.status >= 400 && err.status < 500) {
+      console.error("fast commit rejected, using blob path");
+      return false;
+    }
+    throw err;
+  }
+  const oid = res.data?.createCommitOnBranch?.commit?.oid;
+  if (!oid) {
+    const msg = res.errors?.map((e) => e.message).join("; ") ?? "";
+    if (/expected|head|stale|fast.?forward/i.test(msg) && /oid|head/i.test(msg))
+      throw new UserFacingError(
+        "Branch conflict: the branch moved. No force push was attempted. Start a fresh upload.",
+      );
+    console.error("fast commit unavailable, using blob path");
+    return false; // Nothing was created; the classic path (also gives clearer permission hints) takes over.
+  }
+  await adopt(oid);
+  return true;
+}
 export async function processClaimedJob(
   job: WorkerJob,
   signal?: AbortSignal,
@@ -316,6 +417,15 @@ export async function processClaimedJob(
         await publishAndConfirm(api);
         return;
       }
+      const changedBytes = changed.reduce((n, f) => n + Number(f.size), 0); // pg returns bigint as string
+      if (
+        process.env.GITHUB_FAST_COMMIT !== "0" &&
+        changed.length <= FAST_COMMIT_FILES &&
+        changedBytes <= FAST_COMMIT_BYTES &&
+        changed.every((f) => f.mode === "100644") &&
+        (await fastCommit(api, lease, files, changed))
+      )
+        return;
       await lease.save({ processing_stage: "uploading_blobs" });
       const byPath = new Map(files.map((f) => [f.path, f.data]));
       const groups = [

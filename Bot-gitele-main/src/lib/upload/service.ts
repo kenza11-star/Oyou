@@ -610,19 +610,32 @@ export async function processJobNow(userId: number, jobId: string): Promise<JobS
   const { loadEnv } = await import("../env");
   const owned = await db().query("select 1 from app.upload_jobs where id=$1 and telegram_user_id=$2", [jobId, userId]);
   if (owned.rowCount) {
-    const job = await claimJobById(jobId);
-    if (job) {
-      try {
-        await processClaimedJob(job);
-      } catch (e) {
-        console.error("inline processing", e instanceof Error ? e.name : "unknown");
+    const started = Date.now();
+    for (;;) {
+      const job = await claimJobById(jobId);
+      if (job) {
+        try {
+          await processClaimedJob(job);
+        } catch (e) {
+          console.error("inline processing", e instanceof Error ? e.name : "unknown");
+        }
       }
-      try {
-        const token = loadEnv().telegramBotToken;
-        for (let i = 0; i < 6; i++) if (!(await deliverOneNotice(token))) break;
-      } catch {
-        /* Telegram notices are best effort; the sweep delivers leftovers. */
-      }
+      // A short wait (GitHub budget / rate limit) is waited out here instead of leaving the job for the slow sweep.
+      const { rows } = await db().query<{ status: string; wait_ms: number }>(
+        "select status,greatest(0,extract(epoch from (next_attempt_at-now()))*1000)::float8 as wait_ms from app.upload_jobs where id=$1",
+        [jobId],
+      );
+      const r = rows[0];
+      if (!r || !["uploaded", "processing"].includes(r.status)) break;
+      const wait = Math.max(r.wait_ms, 800);
+      if (Date.now() - started + wait > 45_000) break; // stays inside the 60 s function limit
+      await new Promise((res) => setTimeout(res, wait + 100));
+    }
+    try {
+      const token = loadEnv().telegramBotToken;
+      for (let i = 0; i < 6; i++) if (!(await deliverOneNotice(token))) break;
+    } catch {
+      /* Telegram notices are best effort; the sweep delivers leftovers. */
     }
   }
   return getJobSummary(userId, jobId);

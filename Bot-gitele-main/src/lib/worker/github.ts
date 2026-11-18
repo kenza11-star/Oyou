@@ -7,7 +7,7 @@ import { AdaptiveConcurrency, HttpError, withRetry } from "../transfer/engine";
 import { Lease, Deferred, reserveMutation, blockGithub } from "./state";
 
 export class WorkerGithub {
-  readonly concurrency = new AdaptiveConcurrency(6, 2, 16);
+  readonly concurrency = new AdaptiveConcurrency(12, 2, 32);
   constructor(
     public token: string,
     readonly lease: Lease,

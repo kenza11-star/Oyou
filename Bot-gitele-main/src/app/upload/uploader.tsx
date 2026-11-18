@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { SendFlow } from "../app/send-flow";
 import {
   AdaptiveConcurrency,
   HttpError,
@@ -11,9 +12,9 @@ import { throughput, type Sample } from "@/lib/telegram/progress";
 import { resumeStorageKey, type ResumeScope } from "@/lib/upload/resume";
 import { CHUNK_LIMITS, UPLOAD_LIMITS } from "@/lib/upload/limits";
 
-const START_CONCURRENCY = 6;
+const START_CONCURRENCY = 10;
 const MIN_CONCURRENCY = 2;
-const MAX_CONCURRENCY = 16;
+const MAX_CONCURRENCY = 32;
 const MB = 1024 * 1024;
 const processingLabels: Record<string, string> = {
   verifying: "Memverifikasi ZIP",
@@ -754,6 +755,7 @@ export default function Uploader({
 
           {phase !== "idle" && (
             <div className="card">
+              <SendFlow state={phase === "completed" ? "ok" : phase === "error" ? "bad" : phase === "cancelled" ? "stopped" : "sending"} />
               <div className="head">
                 <span className="status">{statusText}</span>
                 <span className="big">{total > 0 ? `${pct}%` : "—"}</span>
@@ -795,16 +797,9 @@ export default function Uploader({
             </div>
           )}
 
-          {phase === "ready" && (
-            <p className="ok">
-              ZIP diterima dan langsung dikirim ke GitHub, tanpa antrean. Tunggu sampai muncul “GitHub update ✓”; jika halaman ditutup, proses tetap dilanjutkan di server.
-            </p>
-          )}
           {(phase === "processing" || phase === "completed") && (
             <p className="info">
-              File diproses: {job?.filesProcessed ?? 0} / {job?.filesTotal ?? "—"}.{" "}
-              {phase === "completed" ? "Ditambah" : "Rencana ditambah"}: {job?.added ?? 0}, diperbarui: {job?.updated ?? 0}, tidak berubah: {job?.unchanged ?? 0}.
-              {phase !== "completed" && " Perubahan belum di-commit sampai GitHub mengonfirmasi."}
+              {job?.filesProcessed ?? 0}/{job?.filesTotal ?? "—"} file · +{job?.added ?? 0} ~{job?.updated ?? 0} ={job?.unchanged ?? 0}
             </p>
           )}
           {phase === "completed" && (
@@ -814,13 +809,13 @@ export default function Uploader({
                   <svg className="check" viewBox="0 0 20 20" fill="none" aria-hidden="true">
                     <path d="M4 10.5l4 4 8-9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
-                  GitHub mengonfirmasi commit {job.commitSha.slice(0, 7)} di {job.repoFullName} ({job.branch}).{" "}
+                  {job.commitSha.slice(0, 7)} · {job.branch}{" "}
                   {job.commitUrl && (
                     <a href={job.commitUrl} target="_blank" rel="noreferrer">Lihat commit</a>
                   )}
                 </>
               ) : (
-                "Sudah terbaru. Tidak ada commit yang dibuat."
+                "Sudah terbaru."
               )}
             </p>
           )}

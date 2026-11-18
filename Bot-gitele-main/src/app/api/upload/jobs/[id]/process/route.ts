@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { withUser } from "@/lib/upload/http";
 import { processJobNow } from "@/lib/upload/service";
 
-export const maxDuration = 300;
+export const maxDuration = 60;
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
