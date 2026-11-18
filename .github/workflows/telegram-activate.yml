@@ -1,0 +1,35 @@
+name: Aktivasi webhook Telegram
+# Manual only. Registers the Telegram webhook using repository secrets (never a browser URL).
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "register = setWebhook + verifikasi; check = hanya verifikasi"
+        type: choice
+        options: [register, check]
+        default: register
+permissions:
+  contents: read
+concurrency:
+  group: telegram-activate
+  cancel-in-progress: false
+jobs:
+  activate:
+    if: github.repository == 'kenza11-star/Bot-gitele'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Activate
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
+          APP_URL: ${{ secrets.APP_URL }}
+          MODE: ${{ inputs.mode }}
+        run: |
+          if [ "$MODE" = "check" ]; then npm run telegram:activate -- --check; else npm run telegram:activate; fi

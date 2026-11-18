@@ -1,0 +1,43 @@
+{
+  "name": "github-manager-bot",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:browser": "node scripts/check-uploader.cjs",
+    "worker:check": "node --import tsx src/worker.ts --check",
+    "telegram:activate": "node --import tsx scripts/telegram-activate.ts",
+    "start": "next start",
+    "worker:actions": "node --import tsx src/worker.ts --batch",
+    "worker:once": "node --import tsx src/worker.ts --once",
+    "test:node": "node --import tsx --test tests/node/*.test.ts"
+  },
+  "dependencies": {
+    "fflate": "0.8.3",
+    "next": "15.5.29",
+    "pg": "8.13.1",
+    "react": "19.2.6",
+    "react-dom": "19.2.6",
+    "tsx": "4.23.15"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.3.14",
+    "@testing-library/react": "16.3.0",
+    "@types/node": "22.20.5",
+    "@types/pg": "8.11.10",
+    "@types/react": "19.0.2",
+    "jsdom": "26.1.0",
+    "playwright": "1.62.1",
+    "typescript": "5.7.2",
+    "vitest": "5.1.0"
+  },
+  "overrides": {
+    "postcss": "8.5.33"
+  },
+  "engines": {
+    "node": "24.x"
+  }
+}
